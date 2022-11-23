@@ -63,6 +63,7 @@ pub(crate) enum ItemBody {
     // quote byte, can_open, can_close
     MaybeSmartQuote(u8, bool, bool),
     MaybeCode(usize, bool), // number of backticks, preceded by backslash
+    MaybeMath(usize, bool),
     MaybeHtml,
     MaybeLinkOpen,
     // bool indicates whether or not the preceding section could be a reference
@@ -74,6 +75,7 @@ pub(crate) enum ItemBody {
     Strong,
     Strikethrough,
     Code(CowIndex),
+    Math(CowIndex),
     Link(LinkIndex),
     Image(LinkIndex),
     FootnoteReference(CowIndex),
@@ -82,6 +84,7 @@ pub(crate) enum ItemBody {
     Rule,
     Heading(HeadingLevel, Option<HeadingIndex>), // heading level
     FencedCodeBlock(CowIndex),
+    FencedMathBlock(CowIndex),
     IndentCodeBlock,
     Html,
     OwnedHtml(CowIndex),
@@ -110,6 +113,7 @@ impl<'a> ItemBody {
                 | ItemBody::MaybeSmartQuote(..)
                 | ItemBody::MaybeHtml
                 | ItemBody::MaybeCode(..)
+                | ItemBody::MaybeMath(..)
                 | ItemBody::MaybeLinkOpen
                 | ItemBody::MaybeLinkClose(..)
                 | ItemBody::MaybeImage
@@ -220,6 +224,7 @@ impl<'input, 'callback> Parser<'input, 'callback> {
     /// precedence, because the URL of links must not be processed.
     fn handle_inline_pass1(&mut self) {
         let mut code_delims = CodeDelims::new();
+        let mut math_delims = MathDelims::new();
         let mut cur = self.tree.cur();
         let mut prev = None;
 
@@ -322,6 +327,52 @@ impl<'input, 'callback> Parser<'input, 'callback> {
                                     break;
                                 } else {
                                     code_delims.insert(delim_count, scan_ix);
+                                }
+                            }
+                            scan = self.tree[scan_ix].next;
+                        }
+                        if scan == None {
+                            self.tree[cur_ix].item.body = ItemBody::Text;
+                        }
+                    }
+                }
+                ItemBody::MaybeMath(mut search_count, preceded_by_backslash) => {
+                    if preceded_by_backslash {
+                        search_count -= 1;
+                        if search_count == 0 {
+                            self.tree[cur_ix].item.body = ItemBody::Text;
+                            prev = cur;
+                            cur = self.tree[cur_ix].next;
+                            continue;
+                        }
+                    }
+
+                    if math_delims.is_populated() {
+                        // we have previously scanned all codeblock delimiters,
+                        // so we can reuse that work
+                        if let Some(scan_ix) = math_delims.find(cur_ix, search_count) {
+                            self.make_math_span(cur_ix, scan_ix, preceded_by_backslash);
+                        } else {
+                            self.tree[cur_ix].item.body = ItemBody::Text;
+                        }
+                    } else {
+                        // we haven't previously scanned all codeblock delimiters,
+                        // so walk the AST
+                        let mut scan = if search_count > 0 {
+                            self.tree[cur_ix].next
+                        } else {
+                            None
+                        };
+                        while let Some(scan_ix) = scan {
+                            if let ItemBody::MaybeMath(delim_count, _) =
+                                self.tree[scan_ix].item.body
+                            {
+                                if search_count == delim_count {
+                                    self.make_math_span(cur_ix, scan_ix, preceded_by_backslash);
+                                    math_delims.clear();
+                                    break;
+                                } else {
+                                    math_delims.insert(delim_count, scan_ix);
                                 }
                             }
                             scan = self.tree[scan_ix].next;
@@ -847,6 +898,87 @@ impl<'input, 'callback> Parser<'input, 'callback> {
         }
     }
 
+
+    fn make_math_span(&mut self, open: TreeIndex, close: TreeIndex, preceding_backslash: bool) {
+        let first_ix = self.tree[open].next.unwrap();
+        let bytes = self.text.as_bytes();
+        let mut span_start = self.tree[open].item.end;
+        let mut span_end = self.tree[close].item.start;
+        let mut buf: Option<String> = None;
+
+        // detect all-space sequences, since they are kept as-is as of commonmark 0.29
+        if !bytes[span_start..span_end].iter().all(|&b| b == b' ') {
+            let opening = matches!(bytes[span_start], b' ' | b'\r' | b'\n');
+            let closing = matches!(bytes[span_end - 1], b' ' | b'\r' | b'\n');
+            let drop_enclosing_whitespace = opening && closing;
+
+            if drop_enclosing_whitespace {
+                span_start += 1;
+                if span_start < span_end {
+                    span_end -= 1;
+                }
+            }
+
+            let mut ix = first_ix;
+
+            while ix != close {
+                let next_ix = self.tree[ix].next.unwrap();
+                if let ItemBody::HardBreak | ItemBody::SoftBreak = self.tree[ix].item.body {
+                    if drop_enclosing_whitespace {
+                        // check whether break should be ignored
+                        if ix == first_ix {
+                            ix = next_ix;
+                            span_start = min(span_end, self.tree[ix].item.start);
+                            continue;
+                        } else if next_ix == close && ix > first_ix {
+                            break;
+                        }
+                    }
+
+                    let end = bytes[self.tree[ix].item.start..]
+                        .iter()
+                        .position(|&b| b == b'\r' || b == b'\n')
+                        .unwrap()
+                        + self.tree[ix].item.start;
+                    if let Some(ref mut buf) = buf {
+                        buf.push_str(&self.text[self.tree[ix].item.start..end]);
+                        buf.push(' ');
+                    } else {
+                        let mut new_buf = String::with_capacity(span_end - span_start);
+                        new_buf.push_str(&self.text[span_start..end]);
+                        new_buf.push(' ');
+                        buf = Some(new_buf);
+                    }
+                } else if let Some(ref mut buf) = buf {
+                    let end = if next_ix == close {
+                        span_end
+                    } else {
+                        self.tree[ix].item.end
+                    };
+                    buf.push_str(&self.text[self.tree[ix].item.start..end]);
+                }
+                ix = next_ix;
+            }
+        }
+
+        let cow = if let Some(buf) = buf {
+            buf.into()
+        } else {
+            self.text[span_start..span_end].into()
+        };
+        if preceding_backslash {
+            self.tree[open].item.body = ItemBody::Text;
+            self.tree[open].item.end = self.tree[open].item.start + 1;
+            self.tree[open].next = Some(close);
+            self.tree[close].item.body = ItemBody::Math(self.allocs.allocate_cow(cow));
+            self.tree[close].item.start = self.tree[open].item.start + 1;
+        } else {
+            self.tree[open].item.body = ItemBody::Math(self.allocs.allocate_cow(cow));
+            self.tree[open].item.end = self.tree[close].item.end;
+            self.tree[open].next = self.tree[close].next;
+        }
+    }
+
     /// On success, returns a buffer containing the inline html and byte offset.
     /// When no bytes were skipped, the buffer will be empty and the html can be
     /// represented as a subslice of the input string.
@@ -1217,6 +1349,52 @@ impl CodeDelims {
     }
 }
 
+struct MathDelims {
+    inner: HashMap<usize, VecDeque<TreeIndex>>,
+    seen_first: bool,
+}
+
+impl MathDelims {
+    fn new() -> Self {
+        Self {
+            inner: Default::default(),
+            seen_first: false,
+        }
+    }
+
+    fn insert(&mut self, count: usize, ix: TreeIndex) {
+        if self.seen_first {
+            self.inner
+                .entry(count)
+                .or_insert_with(Default::default)
+                .push_back(ix);
+        } else {
+            // Skip the first insert, since that delimiter will always
+            // be an opener and not a closer.
+            self.seen_first = true;
+        }
+    }
+
+    fn is_populated(&self) -> bool {
+        !self.inner.is_empty()
+    }
+
+    fn find(&mut self, open_ix: TreeIndex, count: usize) -> Option<TreeIndex> {
+        while let Some(ix) = self.inner.get_mut(&count)?.pop_front() {
+            if ix > open_ix {
+                return Some(ix);
+            }
+        }
+        None
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+        self.seen_first = false;
+    }
+}
+
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct LinkIndex(usize);
 
@@ -1424,6 +1602,9 @@ fn item_to_tag<'a>(item: &Item, allocs: &Allocations<'a>) -> Tag<'a> {
         ItemBody::FencedCodeBlock(cow_ix) => {
             Tag::CodeBlock(CodeBlockKind::Fenced(allocs[cow_ix].clone()))
         }
+        ItemBody::FencedMathBlock(cow_ix) => {
+            Tag::MathBlock(allocs[cow_ix].clone())
+        }
         ItemBody::IndentCodeBlock => Tag::CodeBlock(CodeBlockKind::Indented),
         ItemBody::BlockQuote => Tag::BlockQuote,
         ItemBody::List(_, c, listitem_start) => {
@@ -1447,6 +1628,7 @@ fn item_to_event<'a>(item: Item, text: &'a str, allocs: &Allocations<'a>) -> Eve
     let tag = match item.body {
         ItemBody::Text => return Event::Text(text[item.start..item.end].into()),
         ItemBody::Code(cow_ix) => return Event::Code(allocs[cow_ix].clone()),
+        ItemBody::Math(cow_ix) => return Event::Math(allocs[cow_ix].clone()),
         ItemBody::SynthesizeText(cow_ix) => return Event::Text(allocs[cow_ix].clone()),
         ItemBody::SynthesizeChar(c) => return Event::Text(c.into()),
         ItemBody::Html => return Event::Html(text[item.start..item.end].into()),
@@ -1478,6 +1660,9 @@ fn item_to_event<'a>(item: Item, text: &'a str, allocs: &Allocations<'a>) -> Eve
         ItemBody::Heading(level, None) => Tag::Heading(level, None, Vec::new()),
         ItemBody::FencedCodeBlock(cow_ix) => {
             Tag::CodeBlock(CodeBlockKind::Fenced(allocs[cow_ix].clone()))
+        }
+        ItemBody::FencedMathBlock(cow_ix) => {
+            Tag::MathBlock(allocs[cow_ix].clone())
         }
         ItemBody::IndentCodeBlock => Tag::CodeBlock(CodeBlockKind::Indented),
         ItemBody::BlockQuote => Tag::BlockQuote,

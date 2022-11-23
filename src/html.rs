@@ -101,6 +101,11 @@ where
                     escape_html(&mut self.writer, &text)?;
                     self.write("</code>")?;
                 }
+                Math(text) => {
+                    self.write("<math>")?;
+                    escape_html(&mut self.writer, &text)?;
+                    self.write("</math>")?;
+                }
                 Html(html) => {
                     self.write(&html)?;
                 }
@@ -226,6 +231,9 @@ where
                     CodeBlockKind::Indented => self.write("<pre><code>"),
                 }
             }
+            Tag::MathBlock(_info) => {
+                self.write("<p><math>\n")
+            }
             Tag::List(Some(1)) => {
                 if self.end_newline {
                     self.write("<ol>\n")
@@ -341,6 +349,9 @@ where
             Tag::CodeBlock(_) => {
                 self.write("</code></pre>\n")?;
             }
+            Tag::MathBlock(_) => {
+                self.write("</math></p>\n")?;
+            }
             Tag::List(Some(_)) => {
                 self.write("</ol>\n")?;
             }
@@ -382,7 +393,7 @@ where
                     }
                     nest -= 1;
                 }
-                Html(text) | Code(text) | Text(text) => {
+                Html(text) | Code(text) | Text(text) | Math(text) => {
                     escape_html(&mut self.writer, &text)?;
                     self.end_newline = text.ends_with('\n');
                 }

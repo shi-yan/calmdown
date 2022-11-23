@@ -109,6 +109,7 @@ pub enum Tag<'a> {
     BlockQuote,
     /// A code block.
     CodeBlock(CodeBlockKind<'a>),
+    MathBlock(CowStr<'a>),
 
     /// A list. If the list is ordered the field indicates the number of the first item.
     /// Contains only list items.
@@ -241,6 +242,8 @@ pub enum Event<'a> {
     /// An inline code node.
     #[cfg_attr(feature = "serde", serde(borrow))]
     Code(CowStr<'a>),
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    Math(CowStr<'a>),
     /// An HTML node.
     #[cfg_attr(feature = "serde", serde(borrow))]
     Html(CowStr<'a>),

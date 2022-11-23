@@ -348,7 +348,7 @@ fn is_digit(c: u8) -> bool {
 fn is_valid_unquoted_attr_value_char(c: u8) -> bool {
     !matches!(
         c,
-        b'\'' | b'"' | b' ' | b'=' | b'>' | b'<' | b'`' | b'\n' | b'\r'
+        b'\'' | b'"' | b' ' | b'=' | b'>' | b'<' | b'`' | b'$' | b'\n' | b'\r'
     )
 }
 
@@ -598,6 +598,27 @@ pub(crate) fn scan_code_fence(data: &[u8]) -> Option<(usize, u8)> {
             }
         }
         Some((i, c))
+    } else {
+        None
+    }
+}
+
+pub(crate) fn scan_math_fence(data: &[u8]) -> Option<usize> {
+    let c = *data.get(0)?;
+    if !(c == b'$') {
+        return None;
+    }
+    let i = 1 + scan_ch_repeat(&data[1..], c);
+    if i >= 2 {
+        if c == b'$' {
+            let suffix = &data[i..];
+            let next_line = i + scan_nextline(suffix);
+            // FIXME: make sure this is correct
+            if suffix[..(next_line - i)].iter().any(|&b| b == b'$') {
+                return None;
+            }
+        }
+        Some(i)
     } else {
         None
     }
@@ -942,7 +963,7 @@ fn scan_attribute_value(
             }
             return None;
         }
-        b' ' | b'=' | b'>' | b'<' | b'`' | b'\n' | b'\r' => {
+        b' ' | b'=' | b'>' | b'<' | b'`' | b'$' | b'\n' | b'\r' => {
             return None;
         }
         _ => {

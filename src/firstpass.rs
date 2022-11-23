@@ -199,6 +199,10 @@ impl<'a, 'b> FirstPass<'a, 'b> {
         if let Some((n, fence_ch)) = scan_code_fence(&bytes[ix..]) {
             return self.parse_fenced_code_block(ix, indent, fence_ch, n);
         }
+
+        if let Some(n) = scan_math_fence(&bytes[ix..]) {
+            return self.parse_fenced_math_block(ix, indent, n);
+        }
         self.parse_paragraph(ix)
     }
 
@@ -549,6 +553,15 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                             });
                             begin_text = ix + 1 + count;
                             LoopInstruction::ContinueAndSkip(count)
+                        } else if bytes[ix + 1] == b'$' {
+                            let count = 1 + scan_ch_repeat(&bytes[(ix + 2)..], b'$');
+                            self.tree.append(Item {
+                                start: ix + 1,
+                                end: ix + count + 1,
+                                body: ItemBody::MaybeMath(count, true),
+                            });
+                            begin_text = ix + 1 + count;
+                            LoopInstruction::ContinueAndSkip(count)
                         } else {
                             begin_text = ix + 1;
                             LoopInstruction::ContinueAndSkip(1)
@@ -584,6 +597,17 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                         start: ix,
                         end: ix + count,
                         body: ItemBody::MaybeCode(count, false),
+                    });
+                    begin_text = ix + count;
+                    LoopInstruction::ContinueAndSkip(count - 1)
+                }
+                b'$' => {
+                    self.tree.append_text(begin_text, ix);
+                    let count = 1 + scan_ch_repeat(&bytes[(ix + 1)..], b'$');
+                    self.tree.append(Item {
+                        start: ix,
+                        end: ix + count,
+                        body: ItemBody::MaybeMath(count, false),
                     });
                     begin_text = ix + count;
                     LoopInstruction::ContinueAndSkip(count - 1)
@@ -873,6 +897,56 @@ impl<'a, 'b> FirstPass<'a, 'b> {
             start: start_ix,
             end: 0, // will get set later
             body: ItemBody::FencedCodeBlock(self.allocs.allocate_cow(info_string)),
+        });
+        self.tree.push();
+        loop {
+            let mut line_start = LineStart::new(&bytes[ix..]);
+            let n_containers = scan_containers(&self.tree, &mut line_start);
+            if n_containers < self.tree.spine_len() {
+                break;
+            }
+            line_start.scan_space(indent);
+            let mut close_line_start = line_start.clone();
+            if !close_line_start.scan_space(4) {
+                let close_ix = ix + close_line_start.bytes_scanned();
+                if let Some(n) = scan_closing_code_fence(&bytes[close_ix..], fence_ch, n_fence_char)
+                {
+                    ix = close_ix + n;
+                    break;
+                }
+            }
+            let remaining_space = line_start.remaining_space();
+            ix += line_start.bytes_scanned();
+            let next_ix = ix + scan_nextline(&bytes[ix..]);
+            self.append_code_text(remaining_space, ix, next_ix);
+            ix = next_ix;
+        }
+
+        self.pop(ix);
+
+        // try to read trailing whitespace or it will register as a completely blank line
+        ix + scan_blank_line(&bytes[ix..]).unwrap_or(0)
+    }
+
+    fn parse_fenced_math_block(
+        &mut self,
+        start_ix: usize,
+        indent: usize,
+        n_fence_char: usize,
+    ) -> usize {
+        let fence_ch = b'$';
+        let bytes = self.text.as_bytes();
+        let mut info_start = start_ix + n_fence_char;
+        info_start += scan_whitespace_no_nl(&bytes[info_start..]);
+        // TODO: info strings are typically very short. wouldn't it be faster
+        // to just do a forward scan here?
+        let mut ix = info_start + scan_nextline(&bytes[info_start..]);
+        let info_end = ix - scan_rev_while(&bytes[info_start..ix], is_ascii_whitespace);
+        let info_string = unescape(&self.text[info_start..info_end]);
+        self.tree.append(Item {
+            start: start_ix,
+            end: 0, // will get set later
+            body: ItemBody::FencedMathBlock(self.allocs.allocate_cow(info_string)),
         });
         self.tree.push();
         loop {
@@ -1478,7 +1552,7 @@ fn create_lut(options: &Options) -> LookupTable {
 fn special_bytes(options: &Options) -> [bool; 256] {
     let mut bytes = [false; 256];
     let standard_bytes = [
-        b'\n', b'\r', b'*', b'_', b'&', b'\\', b'[', b']', b'<', b'!', b'`',
+        b'\n', b'\r', b'*', b'_', b'&', b'\\', b'[', b']', b'<', b'!', b'`', b'$',
     ];
 
     for &byte in &standard_bytes {
@@ -1705,7 +1779,7 @@ mod simd {
     pub(super) fn compute_lookup(options: &Options) -> [u8; 16] {
         let mut lookup = [0u8; 16];
         let standard_bytes = [
-            b'\n', b'\r', b'*', b'_', b'&', b'\\', b'[', b']', b'<', b'!', b'`',
+            b'\n', b'\r', b'*', b'_', b'&', b'\\', b'[', b']', b'<', b'!', b'`',b'$',
         ];
 
         for &byte in &standard_bytes {
@@ -1907,7 +1981,7 @@ mod simd {
         #[test]
         fn exhaustive_search() {
             let chars = [
-                b'\n', b'\r', b'*', b'_', b'~', b'|', b'&', b'\\', b'[', b']', b'<', b'!', b'`',
+                b'\n', b'\r', b'*', b'_', b'~', b'|', b'&', b'\\', b'[', b']', b'<', b'!', b'`', b'$',
             ];
 
             for &c in &chars {
