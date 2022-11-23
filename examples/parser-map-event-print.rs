@@ -1,4 +1,4 @@
-use pulldown_cmark::{Event, Parser, html};
+use calmdown::{Event, Parser, html};
 
 fn main() {
     let markdown_input = "# Example Heading\nExample paragraph with **lorem** _ipsum_ text $ a=3$.\n\n$$\n\\f\\relax{x} = \\int_{-\\infty}^\\infty\n\\f\\hat\\xi\\,e^{2 \\pi i \\xi x}\n\\,d\\xi\n$$\ntest video\n\n!{sample_video}\ntest.";

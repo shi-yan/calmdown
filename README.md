@@ -2,7 +2,7 @@
 
 calmdown is my markdown flavor and parser forked from [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark).
 
-In perticular, I added the following features:
+In particular, I added the following features:
 
 1. inline `$` and block math `$$`
 2. youtube video `!{youtube_url}`
