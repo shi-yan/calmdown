@@ -325,6 +325,14 @@ pub(crate) fn is_ascii_whitespace(c: u8) -> bool {
     (c >= 0x09 && c <= 0x0d) || c == b' '
 }
 
+pub(crate) fn is_left_curly_bracket(c: u8) -> bool {
+    c == b'{'
+}
+
+pub(crate) fn is_not_right_curly_bracket(c: u8) -> bool {
+    c != b'}'
+}
+
 pub(crate) fn is_ascii_whitespace_no_nl(c: u8) -> bool {
     c == b'\t' || c == 0x0b || c == 0x0c || c == b' '
 }
@@ -620,6 +628,21 @@ pub(crate) fn scan_math_fence(data: &[u8]) -> Option<usize> {
         }
         Some(i)
     } else {
+        None
+    }
+}
+
+pub(crate) fn scan_video_fence(data: &[u8]) -> Option<usize> {
+    let c = *data.get(0)?;
+    if !(c == b'!') {
+        return None;
+    }
+    let i = 1 + scan_while(&data[1..], is_left_curly_bracket);
+    
+    if i == 2 {
+        Some(i)
+    }
+    else {
         None
     }
 }

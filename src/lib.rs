@@ -137,6 +137,7 @@ pub enum Tag<'a> {
 
     /// A link. The first field is the link type, the second the destination URL and the third is a title.
     Link(LinkType, CowStr<'a>, CowStr<'a>),
+    Video(CowStr<'a>),
 
     /// An image. The first field is the link type, the second the destination URL and the third is a title.
     Image(LinkType, CowStr<'a>, CowStr<'a>),

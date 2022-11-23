@@ -285,6 +285,11 @@ where
                 }
                 self.write("\">")
             }
+            Tag::Video(info) => {
+                self.write("<video href=\"")?;
+                escape_href(&mut self.writer, &info)?;
+                self.write("\">")
+            }
             Tag::Image(_link_type, dest, title) => {
                 self.write("<img src=\"")?;
                 escape_href(&mut self.writer, &dest)?;
@@ -372,6 +377,9 @@ where
             }
             Tag::Link(_, _, _) => {
                 self.write("</a>")?;
+            }
+            Tag::Video(_) => {
+                self.write("</video>")?;
             }
             Tag::Image(_, _, _) => (), // shouldn't happen, handled in start
             Tag::FootnoteDefinition(_) => {

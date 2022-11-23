@@ -85,6 +85,7 @@ pub(crate) enum ItemBody {
     Heading(HeadingLevel, Option<HeadingIndex>), // heading level
     FencedCodeBlock(CowIndex),
     FencedMathBlock(CowIndex),
+    FencedVideoBlock(CowIndex),
     IndentCodeBlock,
     Html,
     OwnedHtml(CowIndex),
@@ -760,7 +761,13 @@ impl<'input, 'callback> Parser<'input, 'callback> {
             Some(b @ b'\'') | Some(b @ b'\"') | Some(b @ b'(') => *b,
             _ => return None,
         };
-        let close = if open == b'(' { b')' } else { open };
+        let close = if open == b'(' {
+            b')'
+        } else if open == b'{' {
+            b'}'
+        } else {
+            open
+        };
 
         let mut title = String::new();
         let mut mark = start_ix + 1;
@@ -897,7 +904,6 @@ impl<'input, 'callback> Parser<'input, 'callback> {
             self.tree[open].next = self.tree[close].next;
         }
     }
-
 
     fn make_math_span(&mut self, open: TreeIndex, close: TreeIndex, preceding_backslash: bool) {
         let first_ix = self.tree[open].next.unwrap();
@@ -1394,7 +1400,6 @@ impl MathDelims {
     }
 }
 
-
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct LinkIndex(usize);
 
@@ -1590,6 +1595,9 @@ fn item_to_tag<'a>(item: &Item, allocs: &Allocations<'a>) -> Tag<'a> {
             let &(ref link_type, ref url, ref title) = allocs.index(link_ix);
             Tag::Link(*link_type, url.clone(), title.clone())
         }
+        ItemBody::FencedVideoBlock(cow_ix) => {
+            Tag::Video(allocs[cow_ix].clone())
+        }
         ItemBody::Image(link_ix) => {
             let &(ref link_type, ref url, ref title) = allocs.index(link_ix);
             Tag::Image(*link_type, url.clone(), title.clone())
@@ -1602,9 +1610,7 @@ fn item_to_tag<'a>(item: &Item, allocs: &Allocations<'a>) -> Tag<'a> {
         ItemBody::FencedCodeBlock(cow_ix) => {
             Tag::CodeBlock(CodeBlockKind::Fenced(allocs[cow_ix].clone()))
         }
-        ItemBody::FencedMathBlock(cow_ix) => {
-            Tag::MathBlock(allocs[cow_ix].clone())
-        }
+        ItemBody::FencedMathBlock(cow_ix) => Tag::MathBlock(allocs[cow_ix].clone()),
         ItemBody::IndentCodeBlock => Tag::CodeBlock(CodeBlockKind::Indented),
         ItemBody::BlockQuote => Tag::BlockQuote,
         ItemBody::List(_, c, listitem_start) => {
@@ -1649,6 +1655,9 @@ fn item_to_event<'a>(item: Item, text: &'a str, allocs: &Allocations<'a>) -> Eve
             let &(ref link_type, ref url, ref title) = allocs.index(link_ix);
             Tag::Link(*link_type, url.clone(), title.clone())
         }
+        ItemBody::FencedVideoBlock(cow_ix) => {
+            Tag::Video(allocs[cow_ix].clone())
+        }
         ItemBody::Image(link_ix) => {
             let &(ref link_type, ref url, ref title) = allocs.index(link_ix);
             Tag::Image(*link_type, url.clone(), title.clone())
@@ -1661,9 +1670,7 @@ fn item_to_event<'a>(item: Item, text: &'a str, allocs: &Allocations<'a>) -> Eve
         ItemBody::FencedCodeBlock(cow_ix) => {
             Tag::CodeBlock(CodeBlockKind::Fenced(allocs[cow_ix].clone()))
         }
-        ItemBody::FencedMathBlock(cow_ix) => {
-            Tag::MathBlock(allocs[cow_ix].clone())
-        }
+        ItemBody::FencedMathBlock(cow_ix) => Tag::MathBlock(allocs[cow_ix].clone()),
         ItemBody::IndentCodeBlock => Tag::CodeBlock(CodeBlockKind::Indented),
         ItemBody::BlockQuote => Tag::BlockQuote,
         ItemBody::List(_, c, listitem_start) => {

@@ -203,6 +203,10 @@ impl<'a, 'b> FirstPass<'a, 'b> {
         if let Some(n) = scan_math_fence(&bytes[ix..]) {
             return self.parse_fenced_math_block(ix, indent, n);
         }
+
+        if let Some(_n) = scan_video_fence(&bytes[ix..]) {
+            return self.parse_fenced_video_block(ix);
+        }
         self.parse_paragraph(ix)
     }
 
@@ -973,6 +977,26 @@ impl<'a, 'b> FirstPass<'a, 'b> {
         }
 
         self.pop(ix);
+
+        // try to read trailing whitespace or it will register as a completely blank line
+        ix + scan_blank_line(&bytes[ix..]).unwrap_or(0)
+    }
+
+    fn parse_fenced_video_block(&mut self, start_ix: usize) -> usize {
+        let bytes = self.text.as_bytes();
+        let mut info_start = start_ix + 2;
+        info_start += scan_whitespace_no_nl(&bytes[info_start..]);
+        // TODO: info strings are typically very short. wouldn't it be faster
+        // to just do a forward scan here?
+        let mut ix = info_start + scan_while(&bytes[info_start..], is_not_right_curly_bracket);
+        let info_end = ix - scan_rev_while(&bytes[info_start..ix], is_ascii_whitespace);
+        let info_string = unescape(&self.text[info_start..info_end]);
+        ix += 1;
+        self.tree.append(Item {
+            start: start_ix,
+            end: ix, // will get set later
+            body: ItemBody::FencedVideoBlock(self.allocs.allocate_cow(info_string)),
+        });
 
         // try to read trailing whitespace or it will register as a completely blank line
         ix + scan_blank_line(&bytes[ix..]).unwrap_or(0)
@@ -1779,7 +1803,7 @@ mod simd {
     pub(super) fn compute_lookup(options: &Options) -> [u8; 16] {
         let mut lookup = [0u8; 16];
         let standard_bytes = [
-            b'\n', b'\r', b'*', b'_', b'&', b'\\', b'[', b']', b'<', b'!', b'`',b'$',
+            b'\n', b'\r', b'*', b'_', b'&', b'\\', b'[', b']', b'<', b'!', b'`', b'$',
         ];
 
         for &byte in &standard_bytes {
@@ -1981,7 +2005,8 @@ mod simd {
         #[test]
         fn exhaustive_search() {
             let chars = [
-                b'\n', b'\r', b'*', b'_', b'~', b'|', b'&', b'\\', b'[', b']', b'<', b'!', b'`', b'$',
+                b'\n', b'\r', b'*', b'_', b'~', b'|', b'&', b'\\', b'[', b']', b'<', b'!', b'`',
+                b'$',
             ];
 
             for &c in &chars {
