@@ -1,10 +1,10 @@
 [package]
-name = "pulldown-cmark"
+name = "calmdown"
 version = "0.9.2"
-authors = [ "Raph Levien <raph.levien@gmail.com>", "Marcus Klaas de Vries <mail@marcusklaas.nl>" ]
+authors = [ "Raph Levien <raph.levien@gmail.com>", "Marcus Klaas de Vries <mail@marcusklaas.nl>", "Shi Yan" ]
 license = "MIT"
-description = "A pull parser for CommonMark"
-repository = "https://github.com/raphlinus/pulldown-cmark"
+description = "A pull parser for CommonMark, plus extensions defined by Shi Yan"
+repository = "https://github.com/shi-yan/calmdown"
 keywords = ["markdown", "commonmark"]
 categories = ["text-processing"]
 edition = "2021"
